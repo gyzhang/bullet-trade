@@ -601,7 +601,14 @@ def _resolve_fq_ref_date(current_dt: Union[datetime, Date, Any], use_real_price:
             return None
     raw = _get_setting('fq_ref_date')
     if raw is None:
-        return Date.today()
+        try:
+            if isinstance(current_dt, datetime):
+                return current_dt.date()
+            if isinstance(current_dt, Date):
+                return current_dt
+            return pd.to_datetime(current_dt).date()
+        except Exception:
+            return Date.today()
     if isinstance(raw, datetime):
         return raw.date()
     if isinstance(raw, Date):

@@ -168,7 +168,7 @@ class StrategySettings:
             'order_volume_ratio': 0.25,  # 成交量比例
             'order_match_mode': 'immediate',  # 下单撮合模式：'bar_end' 或 'immediate'
             'match_by_signal': False,  # 限价资金检查按信号价或撮合价
-            'fq_ref_date': Date.today(),  # 前复权参考日期（use_real_price=False 时使用）
+            'fq_ref_date': None,  # 前复权参考日期（use_real_price=False 时使用，None 表示使用回测当前日期）
         }
     
     def reset(self):
@@ -184,7 +184,7 @@ class StrategySettings:
             'order_volume_ratio': 0.25,
             'order_match_mode': 'immediate',
             'match_by_signal': False,
-            'fq_ref_date': Date.today(),
+            'fq_ref_date': None,
         }
 
 
