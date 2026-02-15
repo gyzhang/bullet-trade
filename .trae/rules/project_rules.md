@@ -8,3 +8,8 @@ conda activate bullet-trade
 - git push origin kevin-horse - 推送到我的 fork
 - git fetch upstream - 从原始项目获取更新
 - git merge upstream/main - 合并原始项目的更新
+
+向 github 推送代码遇到网络不通时，请使用如下脚本使用我启动的 VPN 代理：
+```bash
+export https_proxy=http://127.0.0.1:7897 http_proxy=http://127.0.0.1:7897 all_proxy=socks5://127.0.0.1:7897
+```
