@@ -16,6 +16,7 @@ def initialize(context):
         '000858.XSHE',  # 五粮液
         '300017.XSHE',  # 网宿科技
         '300674.XSHE',  # 宇信科技
+        '300380.XSHE',  # 安硕信息
         '600268.XSHG',  # 国电南自
         '600900.XSHG'   # 长江电力
     ]
@@ -317,7 +318,7 @@ def period(context):
             
             try:
                 order_result = order_value(stock, buy_value)
-                if order_result and order_result.status == OrderStatus.Completed:
+                if order_result:
                     log.info(f"[买入成功] {stock}: 金额 {buy_value:.2f}, 价格 {current_price:.2f}, 评分 {score}")
                     g.cost_prices[stock] = current_price
                     g.entry_dates[stock] = context.current_dt.date()
@@ -325,8 +326,6 @@ def period(context):
                     g.last_trade_dates[stock] = context.current_dt.date()
                     buy_count += 1
                     available_cash = portfolio.available_cash
-                elif order_result:
-                    log.warning(f"[买入委托] {stock}: 委托状态 {order_result.status}, 金额 {buy_value:.2f}")
                 else:
                     log.warning(f"{stock} 下单失败，无委托返回")
             except Exception as e:
