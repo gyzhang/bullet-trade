@@ -13,3 +13,4 @@ conda activate bullet-trade
 ```bash
 export https_proxy=http://127.0.0.1:7897 http_proxy=http://127.0.0.1:7897 all_proxy=socks5://127.0.0.1:7897
 ```
+本项目使用的智能体框架是 agentscope，github上的地址是：https://github.com/agentscope-ai/agentscope

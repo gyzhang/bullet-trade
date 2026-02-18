@@ -3,6 +3,16 @@ import pandas as pd
 import numpy as np
 import datetime
 
+# 导入智能体
+from bullet_trade.agents import (
+    DataAnalystAgent,
+    StrategyAdvisorAgent,
+    RiskControllerAgent,
+    ExecutorAgent,
+    ReporterAgent,
+    Msg
+)
+
 
 def initialize(context):
     set_benchmark('000300.XSHG')
@@ -22,18 +32,28 @@ def initialize(context):
     ]
     
     g.market_index = '000300.XSHG'  # 大盘指数
-    g.ma_short = 5
-    g.ma_long = 20
+    g.ma_short = 7  # 调整短期均线周期
+    g.ma_long = 25  # 调整长期均线周期
     g.vol_window = 20
-    g.max_position_ratio = 0.9
-    g.min_position_ratio = 0.3
-    g.stop_loss = -0.08
-    g.take_profit = 0.15
-    g.trailing_stop_ratio = 0.92  # 移动止损比例
+    g.max_position_ratio = 0.85  # 调整最大仓位比例
+    g.min_position_ratio = 0.25  # 调整最小仓位比例
+    g.stop_loss = -0.07  # 调整止损比例
+    g.take_profit = 0.18  # 调整止盈比例
+    g.trailing_stop_ratio = 0.93  # 调整移动止损比例
     g.cost_prices = {}
     g.entry_dates = {}
     g.max_prices = {}  # 记录持仓期间最高价
     g.last_trade_dates = {}  # 记录每只股票最后交易日期
+    
+    # 初始化智能体
+    g.data_analyst = DataAnalystAgent()
+    g.strategy_advisor = StrategyAdvisorAgent()
+    g.risk_controller = RiskControllerAgent()
+    g.executor = ExecutorAgent()
+    g.reporter = ReporterAgent()
+    
+    # 智能体分析结果缓存
+    g.agent_analysis = {}
     
     run_daily(period, time='14:30')
 
@@ -202,6 +222,24 @@ def check_stock_available(context, stock):
         return False, 0.0
 
 
+def get_market_analysis(context):
+    """获取市场分析结果"""
+    market_trend = check_market_trend(context)
+    market_vol = get_market_volatility(context, g.stocks)
+    
+    # 准备市场数据
+    market_data = f"""
+    市场数据:
+    - 大盘趋势: {market_trend}
+    - 市场波动率: {market_vol*100:.2f}%
+    - 跟踪股票: {', '.join(g.stocks)}
+    """
+    
+    # 使用数据分析师智能体分析市场
+    analysis_msg = g.data_analyst.reply(Msg(name="strategy", content=market_data, role="user"))
+    
+    return analysis_msg.content
+
 def period(context):
     portfolio = context.portfolio
     total_value = portfolio.total_value
@@ -212,6 +250,24 @@ def period(context):
     position_ratio = calculate_position_ratio(context, market_vol, market_trend)
     log.info(f"大盘趋势: {market_trend}, 市场波动率: {market_vol*100:.2f}%, 目标仓位: {position_ratio*100:.1f}%")
     
+    # 每周一进行智能体分析
+    if context.current_dt.weekday() == 0:  # 周一
+        log.info("=== 智能体市场分析 ===")
+        analysis_result = get_market_analysis(context)
+        g.agent_analysis['market'] = analysis_result
+        log.info(f"智能体分析结果: {analysis_result[:200]}...")
+        
+        # 使用策略顾问智能体获取策略建议
+        strategy_msg = g.strategy_advisor.reply(Msg(name="strategy", content=analysis_result, role="user"))
+        g.agent_analysis['strategy'] = strategy_msg.content
+        log.info(f"策略建议: {strategy_msg.content[:200]}...")
+        
+        # 使用风险控制官智能体评估风险
+        risk_msg = g.risk_controller.reply(Msg(name="strategy", content=strategy_msg.content, role="user"))
+        g.agent_analysis['risk'] = risk_msg.content
+        log.info(f"风险评估: {risk_msg.content[:200]}...")
+    
+    # 现有持仓管理逻辑
     for stock in g.stocks:
         is_available, current_price = check_stock_available(context, stock)
         if not is_available:
@@ -267,16 +323,89 @@ def period(context):
             g.max_prices.pop(stock, None)
             g.last_trade_dates[stock] = context.current_dt.date()
     
+    # 选股和买入逻辑
     stock_scores = []
+    
+    # 从智能体分析结果中提取推荐股票
+    recommended_stocks = []
+    if 'strategy' in g.agent_analysis:
+        strategy_content = g.agent_analysis['strategy']
+        # 改进的推荐股票提取逻辑
+        import re
+        
+        # 1. 检查股票代码是否在策略内容中
+        for stock in g.stocks:
+            if stock in strategy_content:
+                recommended_stocks.append(stock)
+        
+        # 2. 从推荐部分提取股票
+        if not recommended_stocks:
+            # 查找推荐股票的模式
+            patterns = [
+                r'推荐关注的个股.*?([\d\.XSHGXSHE,\s]+)',
+                r'推荐个股.*?([\d\.XSHGXSHE,\s]+)',
+                r'关注个股.*?([\d\.XSHGXSHE,\s]+)',
+                r'建议关注.*?([\d\.XSHGXSHE,\s]+)',
+                r'推荐.*?([\d\.XSHGXSHE,\s]+)'
+            ]
+            
+            for pattern in patterns:
+                matches = re.findall(pattern, strategy_content, re.DOTALL)
+                for match in matches:
+                    # 从匹配结果中提取股票代码
+                    stock_candidates = re.findall(r'\d+\.\w+', match)
+                    for candidate in stock_candidates:
+                        if candidate in g.stocks and candidate not in recommended_stocks:
+                            recommended_stocks.append(candidate)
+        
+        # 3. 如果仍然没有推荐，基于市场分析选择股票
+        if not recommended_stocks and 'market' in g.agent_analysis:
+            market_content = g.agent_analysis['market']
+            # 基于市场分析选择可能表现较好的股票
+            if '牛市' in market_content or '上涨' in market_content:
+                # 牛市环境下选择成长股
+                growth_stocks = ['300017.XSHE', '300674.XSHE', '300380.XSHE']
+                for stock in growth_stocks:
+                    if stock in g.stocks:
+                        recommended_stocks.append(stock)
+            elif '熊市' in market_content or '下跌' in market_content:
+                # 熊市环境下选择防御股
+                defensive_stocks = ['600036.XSHG', '601318.XSHG', '600900.XSHG']
+                for stock in defensive_stocks:
+                    if stock in g.stocks:
+                        recommended_stocks.append(stock)
+            else:
+                # 震荡市选择均衡配置
+                balanced_stocks = ['600036.XSHG', '601318.XSHG', '000858.XSHE']
+                for stock in balanced_stocks:
+                    if stock in g.stocks:
+                        recommended_stocks.append(stock)
+    
+    # 结合智能体推荐和技术分析进行选股
     for stock in g.stocks:
         if not can_trade(context, stock):
             continue
         score, ma_short, ma_long = get_stock_score(context, stock)
+        
+        # 如果股票在智能体推荐列表中，增加评分
+        if stock in recommended_stocks:
+            score += 2
+        
         if score >= 2:
             stock_scores.append((stock, score, ma_short, ma_long))
     
     stock_scores.sort(key=lambda x: x[1], reverse=True)
     log.info(f"符合买入条件的股票数量: {len(stock_scores)}")
+    log.info(f"智能体推荐股票: {recommended_stocks}")
+    
+    # 根据智能体风险评估调整仓位
+    if 'risk' in g.agent_analysis:
+        risk_content = g.agent_analysis['risk']
+        # 简单风险调整（实际应用中可能需要更复杂的解析）
+        if '高' in risk_content:
+            position_ratio *= 0.8
+        elif '低' in risk_content:
+            position_ratio *= 1.1
     
     target_total_position = total_value * position_ratio
     current_total_position = 0
@@ -335,6 +464,13 @@ def period(context):
             log.info(f"未买入任何股票：符合条件的{len(stock_scores)}只股票均无有效行情或金额不足")
         else:
             log.info(f"成功买入 {buy_count} 只股票，完成计划的 {buy_count}/{max_buy_count}")
+            
+            # 记录交易结果
+            log.info(f"成功买入 {buy_count} 只股票")
+            for stock, score, ma_short, ma_long in stock_scores[:buy_count]:
+                is_available, current_price = check_stock_available(context, stock)
+                if is_available:
+                    log.info(f"- {stock}: 价格 {current_price:.2f}, 评分 {score}")
     else:
         if available_for_buy <= 1000:
             log.info("可买入金额不足（<1000），跳过买入")
